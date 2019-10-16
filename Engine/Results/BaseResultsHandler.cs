@@ -34,6 +34,12 @@ namespace QuantConnect.Lean.Engine.Results
     public abstract class BaseResultsHandler
     {
         /// <summary>
+        /// Algorithms performance related chart names
+        /// </summary>
+        /// <remarks>Used to calculate the probabilistic sharpe ratio</remarks>
+        protected List<string> AlgorithmPerformanceCharts { get; } = new List<string> { "Strategy Equity", "Benchmark" };
+
+        /// <summary>
         /// Lock to be used when accessing the chart collection
         /// </summary>
         protected object ChartLock { get; }
@@ -156,28 +162,40 @@ namespace QuantConnect.Lean.Engine.Results
         /// <summary>
         /// Gets the algorithm runtime statistics
         /// </summary>
-        /// <remarks>
-        /// TODO: we should not be adding ':' in the collection key
-        /// </remarks>
         protected Dictionary<string, string> GetAlgorithmRuntimeStatistics(
-            Dictionary<string, string> runtimeStatistics = null,
-            bool addColon = false)
+            Dictionary<string, string> runtimeStatistics = null)
         {
-
             if (runtimeStatistics == null)
             {
                 runtimeStatistics = new Dictionary<string, string>();
             }
 
-            runtimeStatistics["Unrealized" + (addColon ? ":" : string.Empty)] = "$" + Algorithm.Portfolio.TotalUnrealizedProfit.ToStringInvariant("N2");
-            runtimeStatistics["Fees" + (addColon ? ":" : string.Empty)] = "-$" + Algorithm.Portfolio.TotalFees.ToStringInvariant("N2");
-            runtimeStatistics["Net Profit" + (addColon ? ":" : string.Empty)] = "$" + Algorithm.Portfolio.TotalProfit.ToStringInvariant("N2");
-            runtimeStatistics["Return" + (addColon ? ":" : string.Empty)] = GetNetReturn().ToStringInvariant("P");
-            runtimeStatistics["Equity" + (addColon ? ":" : string.Empty)] = "$" + Algorithm.Portfolio.TotalPortfolioValue.ToStringInvariant("N2");
-            runtimeStatistics["Holdings" + (addColon ? ":" : string.Empty)] = "$" + Algorithm.Portfolio.TotalHoldingsValue.ToStringInvariant("N2");
-            runtimeStatistics["Volume" + (addColon ? ":" : string.Empty)] = "$" + Algorithm.Portfolio.TotalSaleVolume.ToStringInvariant("N2");
+            runtimeStatistics["Unrealized"] = "$" + Algorithm.Portfolio.TotalUnrealizedProfit.ToStringInvariant("N2");
+            runtimeStatistics["Fees"] = "-$" + Algorithm.Portfolio.TotalFees.ToStringInvariant("N2");
+            runtimeStatistics["Net Profit"] = "$" + Algorithm.Portfolio.TotalProfit.ToStringInvariant("N2");
+            runtimeStatistics["Return"] = GetNetReturn().ToStringInvariant("P");
+            runtimeStatistics["Equity"] = "$" + Algorithm.Portfolio.TotalPortfolioValue.ToStringInvariant("N2");
+            runtimeStatistics["Holdings"] = "$" + Algorithm.Portfolio.TotalHoldingsValue.ToStringInvariant("N2");
+            runtimeStatistics["Volume"] = "$" + Algorithm.Portfolio.TotalSaleVolume.ToStringInvariant("N2");
 
             return runtimeStatistics;
+        }
+
+        /// <summary>
+        /// Helper method do add the probabilistic sharpe ratio value to a given
+        /// dictionary
+        /// </summary>
+        /// <param name="target">The target dictionary to which we want to add the
+        /// probabilistic sharpe ratio</param>
+        /// <param name="performanceCharts">The performance charts <see cref="AlgorithmPerformanceCharts"/></param>
+        protected void AddProbabilisticSharpeRatio(Dictionary<string, string> target,
+            Dictionary<string, Chart> performanceCharts)
+        {
+            var summary = GenerateStatisticsResults(performanceCharts, new SortedDictionary<DateTime, decimal>()).Summary;
+            if (summary.ContainsKey("Probabilistic Sharpe Ratio"))
+            {
+                target["Probabilistic Sharpe Ratio"] = summary["Probabilistic Sharpe Ratio"];
+            }
         }
 
         /// <summary>

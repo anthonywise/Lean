@@ -19,6 +19,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using MathNet.Numerics.Distributions;
 using MathNet.Numerics.Statistics;
 using QuantConnect.Logging;
 
@@ -555,6 +556,49 @@ namespace QuantConnect.Statistics
         public static double TreynorRatio(List<double> algoPerformance, List<double> benchmarkPerformance, double riskFreeRate)
         {
             return (AnnualPerformance(algoPerformance) - riskFreeRate) / (Beta(algoPerformance, benchmarkPerformance));
+        }
+
+        /// <summary>
+        /// Helper method to calculate the probabilistic sharpe ratio
+        /// </summary>
+        /// <param name="listPerformance">The list of algorithm performance values</param>
+        /// <param name="listBenchmark">The list of benchmark values</param>
+        /// <returns>Probabilistic Sharpe Ratio</returns>
+        public static double ProbabilisticSharpeRatio(List<double> listPerformance,
+            List<double> listBenchmark)
+        {
+            if (listBenchmark.Count < 2 || listPerformance.Count < 2)
+            {
+                return 0;
+            }
+            var benchmarkAverage = listBenchmark.Average();
+            var benchmarkStandardDeviation = listBenchmark.StandardDeviation();
+            // we don't annualize it
+            var observedBenchmarkSharpeRatio = benchmarkStandardDeviation.IsNaNOrZero()
+                ? 0 : benchmarkAverage / benchmarkStandardDeviation;
+
+            var performanceAverage = listPerformance.Average();
+            var standardDeviation = listPerformance.StandardDeviation();
+            // we don't annualize it
+            var observedSharpeRatio = standardDeviation.IsNaNOrZero() ? 0 : performanceAverage / standardDeviation;
+
+            var skewness = listPerformance.Skewness();
+            var kurtosis = listPerformance.Kurtosis();
+
+            var operandA = skewness * observedSharpeRatio;
+            var operandB = ((kurtosis - 1) / 4) * (Math.Pow(observedSharpeRatio, 2));
+
+            // Calculated standard deviation of point estimate
+            var estimateStandardDeviation = Math.Pow((1 - operandA + operandB) / (listPerformance.Count - 1), 0.5);
+
+            if (double.IsNaN(estimateStandardDeviation))
+            {
+                return 0;
+            }
+
+            // Calculate PSR(benchmark)
+            var value = estimateStandardDeviation.IsNaNOrZero() ? 0 : (observedSharpeRatio - observedBenchmarkSharpeRatio) / estimateStandardDeviation;
+            return (new Normal()).CumulativeDistribution(value);
         }
 
     } // End of Statistics

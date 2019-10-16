@@ -95,6 +95,14 @@ namespace QuantConnect.Statistics
         public decimal SharpeRatio { get; set; }
 
         /// <summary>
+        /// Probabilistic Sharpe Ratio is a probability measure associated with the Sharpe ratio.
+        /// It informs us of the probability that the estimated Sharpe ratio is greater than a chosen benchmark
+        /// </summary>
+        /// <remarks>See https://www.quantconnect.com/forum/discussion/6483/probabilistic-sharpe-ratio/p1</remarks>
+        [JsonConverter(typeof(JsonRoundingConverter))]
+        public decimal ProbabilisticSharpeRatio { get; set; }
+
+        /// <summary>
         /// Algorithm "Alpha" statistic - abnormal returns over the risk free rate and the relationshio (beta) with the benchmark returns.
         /// </summary>
         [JsonConverter(typeof(JsonRoundingConverter))]
@@ -202,22 +210,25 @@ namespace QuantConnect.Statistics
             AnnualVariance = GetAnnualVariance(listPerformance, tradingDaysPerYear);
             AnnualStandardDeviation = (decimal) Math.Sqrt((double) AnnualVariance);
 
+            var benchmarkAnnualPerformance = GetAnnualPerformance(listBenchmark, tradingDaysPerYear);
             var annualPerformance = GetAnnualPerformance(listPerformance, tradingDaysPerYear);
             SharpeRatio = AnnualStandardDeviation == 0 ? 0 : (annualPerformance - RiskFreeRate) / AnnualStandardDeviation;
 
             var benchmarkVariance = listBenchmark.Variance();
             Beta = benchmarkVariance.IsNaNOrZero() ? 0 : (decimal) (listPerformance.Covariance(listBenchmark) / benchmarkVariance);
 
-            Alpha = Beta == 0 ? 0 : annualPerformance - (RiskFreeRate + Beta * (GetAnnualPerformance(listBenchmark, tradingDaysPerYear) - RiskFreeRate));
+            Alpha = Beta == 0 ? 0 : annualPerformance - (RiskFreeRate + Beta * (benchmarkAnnualPerformance - RiskFreeRate));
 
             var correlation = Correlation.Pearson(listPerformance, listBenchmark);
             var benchmarkAnnualVariance = benchmarkVariance * tradingDaysPerYear;
             TrackingError = correlation.IsNaNOrZero() || benchmarkAnnualVariance.IsNaNOrZero() ? 0 :
                 (decimal)Math.Sqrt((double)AnnualVariance - 2 * correlation * (double)AnnualStandardDeviation * Math.Sqrt(benchmarkAnnualVariance) + benchmarkAnnualVariance);
 
-            InformationRatio = TrackingError == 0 ? 0 : (annualPerformance - GetAnnualPerformance(listBenchmark, tradingDaysPerYear)) / TrackingError;
+            InformationRatio = TrackingError == 0 ? 0 : (annualPerformance - benchmarkAnnualPerformance) / TrackingError;
 
             TreynorRatio = Beta == 0 ? 0 : (annualPerformance - RiskFreeRate) / Beta;
+
+            ProbabilisticSharpeRatio = Statistics.ProbabilisticSharpeRatio(listPerformance, listBenchmark).SafeDecimalCast();
         }
 
         /// <summary>
@@ -281,6 +292,5 @@ namespace QuantConnect.Statistics
             var variance = performance.Variance();
             return variance.IsNaNOrZero() ? 0 : (decimal)variance * tradingDaysPerYear;
         }
-
     }
 }

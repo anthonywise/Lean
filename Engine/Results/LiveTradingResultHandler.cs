@@ -213,6 +213,7 @@ namespace QuantConnect.Lean.Engine.Results
                     //Create and send back the changes in chart since the algorithm started.
                     var deltaCharts = new Dictionary<string, Chart>();
                     Log.Debug("LiveTradingResultHandler.Update(): Build delta charts");
+                    var performanceCharts = new Dictionary<string, Chart>();
                     lock (ChartLock)
                     {
                         //Get the updates since the last chart
@@ -221,6 +222,11 @@ namespace QuantConnect.Lean.Engine.Results
                             // remove directory pathing characters from chart names
                             var safeName = chart.Value.Name.Replace('/', '-');
                             DictionarySafeAdd(deltaCharts, safeName, chart.Value.GetUpdates(), "deltaCharts");
+
+                            if (AlgorithmPerformanceCharts.Contains(chart.Key))
+                            {
+                                performanceCharts[chart.Key] = chart.Value.Clone();
+                            }
                         }
                     }
                     Log.Debug("LiveTradingResultHandler.Update(): End build delta charts");
@@ -257,7 +263,8 @@ namespace QuantConnect.Lean.Engine.Results
                     Log.Debug("LiveTradingResultHandler.Update(): End build run time stats");
 
                     //Add other fixed parameters.
-                    GetAlgorithmRuntimeStatistics(runtimeStatistics, addColon: true);
+                    GetAlgorithmRuntimeStatistics(runtimeStatistics);
+                    AddProbabilisticSharpeRatio(runtimeStatistics, performanceCharts);
 
                     // since we're sending multiple packets, let's do it async and forget about it
                     // chart data can get big so let's break them up into groups
@@ -346,8 +353,7 @@ namespace QuantConnect.Lean.Engine.Results
                             }
                         }
                         StoreStatusFile(
-                            // todo: runtimeStatistics should not have ':' in the key
-                            runtimeStatistics.ToDictionary(pair => pair.Key.TrimEnd(':'), pair => pair.Value),
+                            runtimeStatistics,
                             holdings,
                             chartComplete,
                             new SortedDictionary<DateTime, decimal>(Algorithm.Transactions.TransactionRecord),
