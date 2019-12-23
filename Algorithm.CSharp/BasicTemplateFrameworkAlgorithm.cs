@@ -41,10 +41,15 @@ namespace QuantConnect.Algorithm.CSharp
             // Set requested data resolution
             UniverseSettings.Resolution = Resolution.Minute;
 
+<<<<<<< HEAD
             //SetStartDate(2013, 10, 07);  //Set Start Date
             //SetEndDate(2013, 10, 11);    //Set End Date
             SetStartDate(2018, 1, 1);      //Set Start Date
             SetEndDate(DateTime.Now);    //Set End Date
+=======
+            SetStartDate(2013, 10, 07);  //Set Start Date
+            SetEndDate(2013, 10, 11);    //Set End Date
+>>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
             SetCash(100000);             //Set Strategy Cash
 
             // Find more symbols here: http://quantconnect.com/data

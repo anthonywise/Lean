@@ -103,7 +103,10 @@
     <Compile Include="AccelerationBands.cs" />
     <Compile Include="AccumulationDistribution.cs" />
     <Compile Include="AccumulationDistributionOscillator.cs" />
+<<<<<<< HEAD
     <Compile Include="AMWTrendv1.cs" />
+=======
+>>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
     <Compile Include="ArnaudLegouxMovingAverage.cs" />
     <Compile Include="AverageDirectionalIndex.cs" />
     <Compile Include="AverageDirectionalMovementIndexRating.cs" />

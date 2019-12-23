@@ -38,9 +38,12 @@
 # QC Config Files:
 # config.json
 
+<<<<<<< HEAD
 # Proprietary Indicators
 # AMWTrendv1.cs
 
+=======
+>>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
 # QC-C-Specific
 *Engine/bin/Debug/cache/data/*.zip
 */obj/*

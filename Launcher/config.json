@@ -38,8 +38,12 @@
   "api-handler": "QuantConnect.Api.Api",
   "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
   "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
+<<<<<<< HEAD
   //"data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
   "data-provider": "QuantConnect.Lean.Engine.DataFeeds.ApiDataProvider",
+=======
+  "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+>>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
   "alpha-handler": "QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler",
 
   // limits on number of symbols to allow
@@ -58,8 +62,13 @@
   "transaction-log": "",
 
   // To get your api access token go to quantconnect.com/account
+<<<<<<< HEAD
   "job-user-id": "87927",
   "api-access-token": "4f19240004b49867119824eb63e3c64b41dd17098de6e6e8ef4a76d0d9b626f4",
+=======
+  "job-user-id": "0",
+  "api-access-token": "",
+>>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
 
   // live data configuration
   "live-data-url": "ws://www.quantconnect.com/api/v2/live/data/",
