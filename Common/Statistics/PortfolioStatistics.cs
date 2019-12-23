@@ -167,8 +167,7 @@ namespace QuantConnect.Statistics
 
         ////add Expectunity
 
-=======
->>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
+
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PortfolioStatistics"/> class
@@ -200,13 +199,11 @@ namespace QuantConnect.Statistics
             var totalLoss = 0m;
             var totalWins = 0;
             var totalLosses = 0;
-<<<<<<< HEAD
             var trades = 0;
             var averageTradeProfitLoss = 0m;
             var sumForVariance = 0m;
             var profitLossStandardDeviation = 0m;
-=======
->>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
+
             foreach (var pair in profitLoss)
             {
                 var tradeProfitLoss = pair.Value;
@@ -223,7 +220,6 @@ namespace QuantConnect.Statistics
                 }
 
                 runningCapital += tradeProfitLoss;
-<<<<<<< HEAD
 
                 trades = totalWins + totalLosses;
 
@@ -233,8 +229,6 @@ namespace QuantConnect.Statistics
                 sumForVariance += (tradeProfitLoss - prevAverageTradeProfitLoss) * (tradeProfitLoss - averageTradeProfitLoss);
                 var variance = trades > 1 ? sumForVariance / (trades - 1) : 0;
                 profitLossStandardDeviation = (decimal)Math.Sqrt((double)variance);
-=======
->>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
             }
 
             AverageWinRate = totalWins == 0 ? 0 : totalProfit / totalWins;
@@ -245,13 +239,10 @@ namespace QuantConnect.Statistics
             LossRate = profitLoss.Count == 0 ? 0 : (decimal) totalLosses / profitLoss.Count;
             Expectancy = WinRate * ProfitLossRatio - LossRate;
 
-<<<<<<< HEAD
             SignalToNoise = profitLossStandardDeviation == 0 ? 0 : Expectancy / profitLossStandardDeviation;
             SQNEstimateRaw = SignalToNoise == 0 ? 0 : SignalToNoise * (decimal)Math.Sqrt((double)trades);
             SQNEstimate100 = SignalToNoise == 0 ? 0 : SignalToNoise * 10;
 
-=======
->>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
             if (startingCapital != 0)
             {
                 TotalNetProfit = equity.Values.LastOrDefault() / startingCapital - 1;

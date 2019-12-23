@@ -182,14 +182,10 @@ namespace QuantConnect.Statistics
                 { "Information Ratio", Math.Round((double)totalPerformance.PortfolioStatistics.InformationRatio, 3).ToStringInvariant() },
                 { "Tracking Error", Math.Round((double)totalPerformance.PortfolioStatistics.TrackingError, 3).ToStringInvariant() },
                 { "Treynor Ratio", Math.Round((double)totalPerformance.PortfolioStatistics.TreynorRatio, 3).ToStringInvariant() },
-<<<<<<< HEAD
                 { "Total Fees", "$" + totalFees.ToStringInvariant("0.00") },
                 { "SignalToNoise", Math.Round((double)totalPerformance.PortfolioStatistics.SignalToNoise, 3).ToStringInvariant() },
                 { "SQNEstimateRaw", Math.Round((double)totalPerformance.PortfolioStatistics.SQNEstimateRaw, 3).ToStringInvariant() },
                 { "SQNEstimate100", Math.Round((double)totalPerformance.PortfolioStatistics.SQNEstimate100, 3).ToStringInvariant() }
-=======
-                { "Total Fees", "$" + totalFees.ToStringInvariant("0.00") }
->>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
             };
         }
 
