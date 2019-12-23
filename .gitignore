@@ -39,7 +39,7 @@
 config.json
 
 # Proprietary Indicators
-# AMWTrendv1.cs
+AMWTrendv1.cs
 
 # QC-C-Specific
 *Engine/bin/Debug/cache/data/*.zip
