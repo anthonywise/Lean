@@ -146,7 +146,6 @@ namespace QuantConnect.Statistics
         [JsonConverter(typeof(JsonRoundingConverter))]
         public decimal TreynorRatio { get; set; }
 
-<<<<<<< HEAD
         /// <summary>
         /// Raw SQN based on AverageLoss
         /// </summary>
@@ -166,8 +165,6 @@ namespace QuantConnect.Statistics
         public decimal SignalToNoise { get; set; }
 
         ////add Expectunity
-
-
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PortfolioStatistics"/> class
