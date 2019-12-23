@@ -15,6 +15,7 @@
 
 using QuantConnect.Data;
 using QuantConnect.Data.Custom.CBOE;
+using QuantConnect.Data.Custom.Fred;
 using QuantConnect.Data.Custom.USEnergy;
 
 namespace QuantConnect.Algorithm.CSharp.AltData
@@ -23,6 +24,7 @@ namespace QuantConnect.Algorithm.CSharp.AltData
     {
         private Symbol _cboeVix;
         private Symbol _usEnergy;
+        private Symbol _fredPeakToTrough;
 
         public override void Initialize()
         {
@@ -33,9 +35,11 @@ namespace QuantConnect.Algorithm.CSharp.AltData
             // QuantConnect caches a small subset of alternative data for easy consumption for the community.
             // You can use this in your algorithm as demonstrated below:
 
-            _cboeVix = AddData<CBOE>("VIX").Symbol;
+            _cboeVix = AddData<CBOE>("VIX", Resolution.Daily).Symbol;
             // United States EIA data: https://eia.gov/
-            _usEnergy = AddData<USEnergy>(USEnergy.Petroleum.UnitedStates.WeeklyGrossInputsIntoRefineries).Symbol;
+            _usEnergy = AddData<USEnergy>(USEnergy.Petroleum.UnitedStates.WeeklyGrossInputsIntoRefineries, Resolution.Daily).Symbol;
+            // FRED data
+            _fredPeakToTrough = AddData<Fred>(Fred.OECDRecessionIndicators.UnitedStatesFromPeakThroughTheTrough, Resolution.Daily).Symbol;
         }
 
         public override void OnData(Slice data)
@@ -50,6 +54,12 @@ namespace QuantConnect.Algorithm.CSharp.AltData
             {
                 var inputIntoRefineries = data.Get<USEnergy>(_usEnergy);
                 Log($"U.S. Input Into Refineries: {Time}, {inputIntoRefineries.Value}");
+            }
+
+            if (data.ContainsKey(_fredPeakToTrough))
+            {
+                var peakToTrough = data.Get<Fred>(_fredPeakToTrough);
+                Log($"OECD based Recession Indicator for the United States from the Peak through the Trough: {peakToTrough}");
             }
         }
     }

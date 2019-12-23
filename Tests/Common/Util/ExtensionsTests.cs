@@ -31,6 +31,44 @@ namespace QuantConnect.Tests.Common.Util
     public class ExtensionsTests
     {
         [Test]
+        public void SeriesIsNotEmpty()
+        {
+            var series = new Series("SadSeries")
+                { Values = new List<ChartPoint> { new ChartPoint(1, 1) } };
+
+            Assert.IsFalse(series.IsEmpty());
+        }
+
+        [Test]
+        public void SeriesIsEmpty()
+        {
+            Assert.IsTrue((new Series("Cat")).IsEmpty());
+        }
+
+        [Test]
+        public void ChartIsEmpty()
+        {
+            Assert.IsTrue((new Chart("HappyChart")).IsEmpty());
+        }
+
+        [Test]
+        public void ChartIsEmptyWithEmptySeries()
+        {
+            Assert.IsTrue((new Chart("HappyChart")
+                { Series = new Dictionary<string, Series> { { "SadSeries", new Series("SadSeries") } }}).IsEmpty());
+        }
+
+        [Test]
+        public void ChartIsNotEmptyWithNonEmptySeries()
+        {
+            var series = new Series("SadSeries")
+                { Values = new List<ChartPoint> { new ChartPoint(1, 1) } };
+
+            Assert.IsFalse((new Chart("HappyChart")
+                { Series = new Dictionary<string, Series> { { "SadSeries", series } } }).IsEmpty());
+        }
+
+        [Test]
         public void IsSubclassOfGenericWorksWorksForNonGenericType()
         {
             Assert.IsTrue(typeof(Derived2).IsSubclassOfGeneric(typeof(Derived1)));
@@ -929,6 +967,22 @@ actualDictionary.update({'IBM': 5})
         {
             var value = 10.999999m;
             Assert.AreEqual(10.999m, value.TruncateTo3DecimalPlaces());
+        }
+
+        [Test]
+        public void DecimalTruncateTo3DecimalPlacesDoesNotThrowException()
+        {
+            var value = decimal.MaxValue;
+            Assert.DoesNotThrow(() => value.TruncateTo3DecimalPlaces());
+
+            value = decimal.MinValue;
+            Assert.DoesNotThrow(() => value.TruncateTo3DecimalPlaces());
+
+            value = decimal.MaxValue - 1;
+            Assert.DoesNotThrow(() => value.TruncateTo3DecimalPlaces());
+
+            value = decimal.MinValue + 1;
+            Assert.DoesNotThrow(() => value.TruncateTo3DecimalPlaces());
         }
 
         private PyObject ConvertToPyObject(object value)

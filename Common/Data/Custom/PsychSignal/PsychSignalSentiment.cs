@@ -30,6 +30,27 @@ namespace QuantConnect.Data.Custom.PsychSignal
     public class PsychSignalSentiment : BaseData
     {
         /// <summary>
+        /// The EndTime of the bar represents the time the data ended and
+        /// the time it should be emitted in backtesting/live trading
+        /// </summary>
+        public override DateTime EndTime
+        {
+            get { return Time + Period + FixedLiveOffset; }
+            set { Time = value - Period; }
+        }
+
+        /// <summary>
+        /// Time from the start of the bar until the end of the bar per each data point
+        /// </summary>
+        public TimeSpan Period { get; set; } = TimeSpan.FromMinutes(1);
+
+        /// <summary>
+        /// Time it takes for data to become available on the PsychSignal API after
+        /// the time advances to the next minute
+        /// </summary>
+        private static readonly TimeSpan FixedLiveOffset = TimeSpan.FromSeconds(15);
+
+        /// <summary>
         /// Bullish intensity as reported by psychsignal
         /// </summary>
         public decimal BullIntensity { get; set; }
@@ -82,6 +103,11 @@ namespace QuantConnect.Data.Custom.PsychSignal
         /// <returns></returns>
         public override SubscriptionDataSource GetSource(SubscriptionDataConfig config, DateTime date, bool isLiveMode)
         {
+            if (isLiveMode)
+            {
+                throw new InvalidOperationException();
+            }
+
             return new SubscriptionDataSource(
                 Path.Combine(
                     Globals.DataFolder,
@@ -122,7 +148,7 @@ namespace QuantConnect.Data.Custom.PsychSignal
 
                 return new PsychSignalSentiment
                 {
-                    Time = timestamp,
+                    EndTime = timestamp,
                     Symbol = config.Symbol,
                     BullIntensity = bullIntensity,
                     BearIntensity = bearIntensity,

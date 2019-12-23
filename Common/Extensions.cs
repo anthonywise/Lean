@@ -30,8 +30,11 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using NodaTime;
 using Python.Runtime;
+using QuantConnect.Algorithm.Framework.Portfolio;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Data;
+using QuantConnect.Interfaces;
+using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Python;
 using QuantConnect.Securities;
@@ -48,6 +51,79 @@ namespace QuantConnect
     {
         private static readonly Dictionary<IntPtr, PythonActivator> PythonActivators
             = new Dictionary<IntPtr, PythonActivator>();
+
+        /// <summary>
+        /// Returns true if the specified <see cref="Series"/> instance holds no <see cref="ChartPoint"/>
+        /// </summary>
+        public static bool IsEmpty(this Series series)
+        {
+            return series.Values.Count == 0;
+        }
+
+        /// <summary>
+        /// Returns if the specified <see cref="Chart"/> instance  holds no <see cref="Series"/>
+        /// or they are all empty <see cref="IsEmpty(Series)"/>
+        /// </summary>
+        public static bool IsEmpty(this Chart chart)
+        {
+            return chart.Series.Values.All(IsEmpty);
+        }
+
+        /// <summary>
+        /// Gets a python method by name
+        /// </summary>
+        /// <param name="instance">The object instance to search the method in</param>
+        /// <param name="name">The name of the method</param>
+        /// <returns>The python method or null if not defined or CSharp implemented</returns>
+        public static dynamic GetPythonMethod(this PyObject instance, string name)
+        {
+            using (Py.GIL())
+            {
+                var method = instance.GetAttr(name);
+                var pythonType = method.GetPythonType();
+                var isPythonDefined = pythonType.Repr().Equals("<class \'method\'>");
+
+                return isPythonDefined ? method : null;
+            }
+        }
+
+        /// <summary>
+        /// Returns an ordered enumerable where position reducing orders are executed first
+        /// and the remaining orders are executed in decreasing order value.
+        /// Will NOT return targets for securities that have no data yet.
+        /// Will NOT return targets for which current holdings + open orders quantity, sum up to the target quantity
+        /// </summary>
+        /// <param name="targets">The portfolio targets to order by margin</param>
+        /// <param name="algorithm">The algorithm instance</param>
+        /// <param name="targetIsDelta">True if the target quantity is the delta between the
+        /// desired and existing quantity</param>
+        public static IEnumerable<IPortfolioTarget> OrderTargetsByMarginImpact(
+            this IEnumerable<IPortfolioTarget> targets,
+            IAlgorithm algorithm,
+            bool targetIsDelta = false)
+        {
+            return targets.Select(x => new {
+                    PortfolioTarget = x,
+                    TargetQuantity = x.Quantity,
+                    ExistingQuantity = algorithm.Portfolio[x.Symbol].Quantity
+                                       + algorithm.Transactions.GetOpenOrderTickets(x.Symbol)
+                                           .Aggregate(0m, (d, t) => d + t.Quantity - t.QuantityFilled),
+                    Security = algorithm.Securities[x.Symbol]
+                })
+                .Where(x => x.Security.HasData
+                            && (targetIsDelta ? Math.Abs(x.TargetQuantity) : Math.Abs(x.TargetQuantity - x.ExistingQuantity))
+                            >= x.Security.SymbolProperties.LotSize
+                )
+                .Select(x => new {
+                    PortfolioTarget = x.PortfolioTarget,
+                    OrderValue = Math.Abs((targetIsDelta ? x.TargetQuantity : (x.TargetQuantity - x.ExistingQuantity)) * x.Security.Price),
+                    IsReducingPosition = x.ExistingQuantity != 0
+                                         && Math.Abs((targetIsDelta ? (x.TargetQuantity + x.ExistingQuantity) : x.TargetQuantity)) < Math.Abs(x.ExistingQuantity)
+                })
+                .OrderByDescending(x => x.IsReducingPosition)
+                .ThenByDescending(x => x.OrderValue)
+                .Select(x => x.PortfolioTarget);
+        }
 
         /// <summary>
         /// Given a type will create a new instance using the parameterless constructor
@@ -290,12 +366,14 @@ namespace QuantConnect
         /// <returns>New instance with just 3 decimal places</returns>
         public static decimal TruncateTo3DecimalPlaces(this decimal value)
         {
-            if (value == decimal.MaxValue
-                || value == decimal.MinValue
+            // we will multiply by 1k bellow, if its bigger it will stack overflow
+            if (value >= decimal.MaxValue / 1000
+                || value <= decimal.MinValue / 1000
                 || value == 0)
             {
                 return value;
             }
+
             return Math.Truncate(1000 * value) / 1000;
         }
 

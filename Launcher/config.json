@@ -45,6 +45,8 @@
   "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
 >>>>>>> 7ac11ae47dbe8c914fe5925f52eadda6e13585ce
   "alpha-handler": "QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler",
+  "data-channel-provider": "DataChannelProvider",
+  "object-store": "QuantConnect.Lean.Engine.Storage.LocalObjectStore",
 
   // limits on number of symbols to allow
   "symbol-minute-limit": 10000,

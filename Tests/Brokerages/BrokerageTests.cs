@@ -196,7 +196,8 @@ namespace QuantConnect.Tests.Brokerages
                 new Cash(Currencies.USD, 0, 1m),
                 SymbolProperties.GetDefault(Currencies.USD),
                 ErrorCurrencyConverter.Instance,
-                RegisteredSecurityDataTypesProvider.Null
+                RegisteredSecurityDataTypesProvider.Null,
+                new SecurityCache()
             );
         }
 
@@ -222,6 +223,7 @@ namespace QuantConnect.Tests.Brokerages
         /// <param name="brokerage">The brokerage instance to be disposed of</param>
         protected virtual void DisposeBrokerage(IBrokerage brokerage)
         {
+            brokerage.Disconnect();
         }
 
         /// <summary>

@@ -152,7 +152,7 @@ namespace QuantConnect.Algorithm
             // universe selection
             UniverseManager = new UniverseManager();
             Universe = new UniverseDefinitions(this);
-            UniverseSettings = new UniverseSettings(Resolution.Minute, 2m, true, false, TimeSpan.FromDays(1));
+            UniverseSettings = new UniverseSettings(Resolution.Minute, Security.NullLeverage, true, false, TimeSpan.FromDays(1));
 
             // initialize our scheduler, this acts as a liason to the real time handler
             Schedule = new ScheduleManager(Securities, TimeZone);
@@ -521,6 +521,11 @@ namespace QuantConnect.Algorithm
         public Slice CurrentSlice { get; private set; }
 
         /// <summary>
+        /// Gets the object store, used for persistence
+        /// </summary>
+        public IObjectStore ObjectStore { get; private set; }
+
+        /// <summary>
         /// Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
         /// </summary>
         /// <seealso cref="SetStartDate(DateTime)"/>
@@ -538,6 +543,11 @@ namespace QuantConnect.Algorithm
         /// </summary>
         public virtual void PostInitialize()
         {
+            if (_endDate < _startDate)
+            {
+                throw new ArgumentException("Please select an algorithm end date greater than start date.");
+            }
+
             FrameworkPostInitialize();
 
             // if the benchmark hasn't been set yet, set it
@@ -1200,11 +1210,10 @@ namespace QuantConnect.Algorithm
         /// <param name="day">Int starting date 1-30</param>
         /// <param name="month">Int month starting date</param>
         /// <param name="year">Int year starting date</param>
-        /// <remarks>
-        ///     Wrapper for SetStartDate(DateTime).
-        ///     Must be less than end date.
-        ///     Ignored in live trading mode.
-        /// </remarks>
+        /// <remarks>Wrapper for SetStartDate(DateTime).
+        /// Must be less than end date.
+        /// Ignored in live trading mode.</remarks>
+        /// <seealso cref="SetStartDate(DateTime)"/>
         public void SetStartDate(int year, int month, int day)
         {
             try
@@ -1262,7 +1271,7 @@ namespace QuantConnect.Algorithm
         /// </summary>
         /// <param name="start">Datetime Start date for backtest</param>
         /// <remarks>Must be less than end date and within data available</remarks>
-        /// <seealso cref="SetStartDate(DateTime)"/>
+        /// <seealso cref="SetStartDate(int, int, int)"/>
         public void SetStartDate(DateTime start)
         {
             // no need to set this value in live mode, will be set using the current time.
@@ -1285,24 +1294,11 @@ namespace QuantConnect.Algorithm
                 throw new ArgumentOutOfRangeException(nameof(start), "Please select start date less than today");
             }
 
-            //3. Check end date greater:
-            if (_endDate != new DateTime())
-            {
-                if (start > _endDate)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(start), "Please select start date less than end date.");
-                }
-            }
-
-            //4. Check not locked already:
+            //3. Check not locked already:
             if (!_locked)
             {
-                // this is only or backtesting
-                if (!LiveMode)
-                {
-                    _startDate = start;
-                    SetDateTime(_startDate.ConvertToUtc(TimeZone));
-                }
+                _startDate = start;
+                SetDateTime(_startDate.ConvertToUtc(TimeZone));
             }
             else
             {
@@ -1315,7 +1311,7 @@ namespace QuantConnect.Algorithm
         /// </summary>
         /// <param name="end">Datetime value for end date</param>
         /// <remarks>Must be greater than the start date</remarks>
-        /// <seealso cref="SetEndDate(DateTime)"/>
+        /// <seealso cref="SetEndDate(int, int, int)"/>
         public void SetEndDate(DateTime end)
         {
             // no need to set this value in live mode, will be set using the current time.
@@ -1328,19 +1324,10 @@ namespace QuantConnect.Algorithm
                 end = DateTime.Now.Date.AddDays(-1);
             }
 
-            //2. Check start date less:
-            if (_startDate != new DateTime())
-            {
-                if (end < _startDate)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(end), "Please select end date greater than start date.");
-                }
-            }
-
-            //3. Make this at the very end of the requested date
+            //2. Make this at the very end of the requested date
             end = end.RoundDown(TimeSpan.FromDays(1)).AddDays(1).AddTicks(-1);
 
-            //4. Check not locked already:
+            //3. Check not locked already:
             if (!_locked)
             {
                 _endDate = end;
@@ -1404,9 +1391,9 @@ namespace QuantConnect.Algorithm
         /// <param name="resolution">Resolution of the Data Required</param>
         /// <param name="fillDataForward">When no data available on a tradebar, return the last data that was generated</param>
         /// <param name="extendedMarketHours">Show the after market data as well</param>
-        public Security AddSecurity(SecurityType securityType, string ticker, Resolution resolution = Resolution.Minute, bool fillDataForward = true, bool extendedMarketHours = false)
+        public Security AddSecurity(SecurityType securityType, string ticker, Resolution? resolution = null, bool fillDataForward = true, bool extendedMarketHours = false)
         {
-            return AddSecurity(securityType, ticker, resolution, fillDataForward, 0, extendedMarketHours);
+            return AddSecurity(securityType, ticker, resolution, fillDataForward, Security.NullLeverage, extendedMarketHours);
         }
 
         /// <summary>
@@ -1419,7 +1406,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">Custom leverage per security</param>
         /// <param name="extendedMarketHours">Extended market hours</param>
         /// <remarks> AddSecurity(SecurityType securityType, Symbol symbol, Resolution resolution, bool fillDataForward, decimal leverage, bool extendedMarketHours)</remarks>
-        public Security AddSecurity(SecurityType securityType, string ticker, Resolution resolution, bool fillDataForward, decimal leverage, bool extendedMarketHours)
+        public Security AddSecurity(SecurityType securityType, string ticker, Resolution? resolution, bool fillDataForward, decimal leverage, bool extendedMarketHours)
         {
             return AddSecurity(securityType, ticker, resolution, null, fillDataForward, leverage, extendedMarketHours);
         }
@@ -1434,7 +1421,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice.</param>
         /// <param name="leverage">leverage for this security</param>
         /// <param name="extendedMarketHours">ExtendedMarketHours send in data from 4am - 8pm, not used for FOREX</param>
-        public Security AddSecurity(SecurityType securityType, string ticker, Resolution resolution, string market, bool fillDataForward, decimal leverage, bool extendedMarketHours)
+        public Security AddSecurity(SecurityType securityType, string ticker, Resolution? resolution, string market, bool fillDataForward, decimal leverage, bool extendedMarketHours)
         {
             // if AddSecurity method is called to add an option or a future, we delegate a call to respective methods
             if (securityType == SecurityType.Option)
@@ -1488,7 +1475,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <param name="extendedMarketHours">True to send data during pre and post market sessions. Default is <value>false</value></param>
         /// <returns>The new <see cref="Equity"/> security</returns>
-        public Equity AddEquity(string ticker, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m, bool extendedMarketHours = false)
+        public Equity AddEquity(string ticker, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage, bool extendedMarketHours = false)
         {
             return AddSecurity<Equity>(SecurityType.Equity, ticker, resolution, market, fillDataForward, leverage, extendedMarketHours);
         }
@@ -1502,7 +1489,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Option"/> security</returns>
-        public Option AddOption(string underlying, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m)
+        public Option AddOption(string underlying, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             if (market == null)
             {
@@ -1535,7 +1522,7 @@ namespace QuantConnect.Algorithm
             Universe universe;
             if (!UniverseManager.TryGetValue(canonicalSymbol, out universe) && _pendingUniverseAdditions.All(u => u.Configuration.Symbol != canonicalSymbol))
             {
-                var settings = new UniverseSettings(resolution, leverage, true, false, TimeSpan.Zero);
+                var settings = new UniverseSettings(configs.Resolution, leverage, true, false, TimeSpan.Zero);
                 universe = new OptionChainUniverse(canonicalSecurity, settings, LiveMode);
                 _pendingUniverseAdditions.Add(universe);
             }
@@ -1552,7 +1539,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Future"/> security</returns>
-        public Future AddFuture(string ticker, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m)
+        public Future AddFuture(string ticker, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             if (market == null)
             {
@@ -1583,7 +1570,7 @@ namespace QuantConnect.Algorithm
             Universe universe;
             if (!UniverseManager.TryGetValue(canonicalSymbol, out universe) && _pendingUniverseAdditions.All(u => u.Configuration.Symbol != canonicalSymbol))
             {
-                var settings = new UniverseSettings(resolution, leverage, true, false, TimeSpan.Zero);
+                var settings = new UniverseSettings(configs[0].Resolution, leverage, true, false, TimeSpan.Zero);
                 universe = new FuturesChainUniverse(canonicalSecurity, settings);
                 _pendingUniverseAdditions.Add(universe);
             }
@@ -1599,7 +1586,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Future"/> security</returns>
-        public Future AddFutureContract(Symbol symbol, Resolution resolution = Resolution.Minute, bool fillDataForward = true, decimal leverage = 0m)
+        public Future AddFutureContract(Symbol symbol, Resolution? resolution = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             var configs = SubscriptionManager.SubscriptionDataConfigService.Add(symbol, resolution, fillDataForward);
             var future = (Future)Securities.CreateSecurity(symbol, configs, leverage);
@@ -1616,7 +1603,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Option"/> security</returns>
-        public Option AddOptionContract(Symbol symbol, Resolution resolution = Resolution.Minute, bool fillDataForward = true, decimal leverage = 0m)
+        public Option AddOptionContract(Symbol symbol, Resolution? resolution = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             var configs = SubscriptionManager.SubscriptionDataConfigService.Add(symbol, resolution, fillDataForward);
             var option = (Option)Securities.CreateSecurity(symbol, configs, leverage);
@@ -1667,7 +1654,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Forex"/> security</returns>
-        public Forex AddForex(string ticker, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m)
+        public Forex AddForex(string ticker, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             return AddSecurity<Forex>(SecurityType.Forex, ticker, resolution, market, fillDataForward, leverage, false);
         }
@@ -1681,7 +1668,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Cfd"/> security</returns>
-        public Cfd AddCfd(string ticker, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m)
+        public Cfd AddCfd(string ticker, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             return AddSecurity<Cfd>(SecurityType.Cfd, ticker, resolution, market, fillDataForward, leverage, false);
         }
@@ -1695,7 +1682,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillDataForward">If true, returns the last available data even if none in that timeslice. Default is <value>true</value></param>
         /// <param name="leverage">The requested leverage for this equity. Default is set by <see cref="SecurityInitializer"/></param>
         /// <returns>The new <see cref="Crypto"/> security</returns>
-        public Crypto AddCrypto(string ticker, Resolution resolution = Resolution.Minute, string market = null, bool fillDataForward = true, decimal leverage = 0m)
+        public Crypto AddCrypto(string ticker, Resolution? resolution = null, string market = null, bool fillDataForward = true, decimal leverage = Security.NullLeverage)
         {
             return AddSecurity<Crypto>(SecurityType.Crypto, ticker, resolution, market, fillDataForward, leverage, false);
         }
@@ -1774,7 +1761,7 @@ namespace QuantConnect.Algorithm
         /// <param name="resolution">Resolution of the data</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(string ticker, Resolution resolution = Resolution.Minute)
+        public Security AddData<T>(string ticker, Resolution? resolution = null)
             where T : IBaseData, new()
         {
             //Add this new generic data as a tradeable security:
@@ -1792,7 +1779,7 @@ namespace QuantConnect.Algorithm
         /// <param name="resolution">Resolution of the data</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(Symbol underlying, Resolution resolution = Resolution.Minute)
+        public Security AddData<T>(Symbol underlying, Resolution? resolution = null)
             where T : IBaseData, new()
         {
             //Add this new generic data as a tradeable security:
@@ -1813,7 +1800,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">Custom leverage per security</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(string ticker, Resolution resolution, bool fillDataForward, decimal leverage = 1.0m)
+        public Security AddData<T>(string ticker, Resolution? resolution, bool fillDataForward, decimal leverage = 1.0m)
             where T : IBaseData, new()
         {
             return AddData<T>(ticker, resolution, null, fillDataForward, leverage);
@@ -1829,7 +1816,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">Custom leverage per security</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(Symbol underlying, Resolution resolution, bool fillDataForward, decimal leverage = 1.0m)
+        public Security AddData<T>(Symbol underlying, Resolution? resolution, bool fillDataForward, decimal leverage = 1.0m)
             where T : IBaseData, new()
         {
             return AddData<T>(underlying, resolution, null, fillDataForward, leverage);
@@ -1845,7 +1832,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">Custom leverage per security</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(string ticker, Resolution resolution, DateTimeZone timeZone, bool fillDataForward = false, decimal leverage = 1.0m)
+        public Security AddData<T>(string ticker, Resolution? resolution, DateTimeZone timeZone, bool fillDataForward = false, decimal leverage = 1.0m)
             where T : IBaseData, new()
         {
             return AddData(typeof(T), ticker, resolution, timeZone, fillDataForward, leverage);
@@ -1861,7 +1848,7 @@ namespace QuantConnect.Algorithm
         /// <param name="leverage">Custom leverage per security</param>
         /// <returns>The new <see cref="Security"/></returns>
         /// <remarks>Generic type T must implement base data</remarks>
-        public Security AddData<T>(Symbol underlying, Resolution resolution, DateTimeZone timeZone, bool fillDataForward = false, decimal leverage = 1.0m)
+        public Security AddData<T>(Symbol underlying, Resolution? resolution, DateTimeZone timeZone, bool fillDataForward = false, decimal leverage = 1.0m)
             where T : IBaseData, new()
         {
             return AddData(typeof(T), underlying, resolution, timeZone, fillDataForward, leverage);
@@ -2057,7 +2044,7 @@ namespace QuantConnect.Algorithm
         /// <summary>
         /// Creates and adds a new <see cref="Security"/> to the algorithm
         /// </summary>
-        private T AddSecurity<T>(SecurityType securityType, string ticker, Resolution resolution, string market, bool fillDataForward, decimal leverage, bool extendedMarketHours)
+        private T AddSecurity<T>(SecurityType securityType, string ticker, Resolution? resolution, string market, bool fillDataForward, decimal leverage, bool extendedMarketHours)
             where T : Security
         {
             if (market == null)
@@ -2151,6 +2138,26 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
+        /// Schedules the provided training code to execute immediately
+        /// </summary>
+        /// <param name="trainingCode">The training code to be invoked</param>
+        public ScheduledEvent Train(Action trainingCode)
+        {
+            return Schedule.TrainingNow(trainingCode);
+        }
+
+        /// <summary>
+        /// Schedules the training code to run using the specified date and time rules
+        /// </summary>
+        /// <param name="dateRule">Specifies what dates the event should run</param>
+        /// <param name="timeRule">Specifies the times on those dates the event should run</param>
+        /// <param name="trainingCode">The training code to be invoked</param>
+        public ScheduledEvent Train(IDateRule dateRule, ITimeRule timeRule, Action trainingCode)
+        {
+            return Schedule.Training(dateRule, timeRule, trainingCode);
+        }
+
+        /// <summary>
         /// Event invocator for the <see cref="InsightsGenerated"/> event
         /// </summary>
         /// <param name="insights">The collection of insights generaed at the current time step</param>
@@ -2185,6 +2192,15 @@ namespace QuantConnect.Algorithm
         public void SetApi(IApi api)
         {
             _api = api;
+        }
+
+        /// <summary>
+        /// Sets the object store
+        /// </summary>
+        /// <param name="objectStore">The object store</param>
+        public void SetObjectStore(IObjectStore objectStore)
+        {
+            ObjectStore = objectStore;
         }
 
         /// <summary>

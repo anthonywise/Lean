@@ -95,7 +95,8 @@ namespace QuantConnect.Tests.Common.Securities
                 new Cash(Currencies.USD, 0, 1m),
                 SymbolProperties.GetDefault(Currencies.USD),
                 ErrorCurrencyConverter.Instance,
-                RegisteredSecurityDataTypesProvider.Null
+                RegisteredSecurityDataTypesProvider.Null,
+                new SecurityCache()
             );
             security.SetLeverage(10m);
             securities.Add(CASH, security);
@@ -208,7 +209,7 @@ namespace QuantConnect.Tests.Common.Securities
             securities.Add(usdJwbSecurity);
             securities.Add(mchUsdSecurity);
 
-            var securityService = new SecurityService(portfolio.CashBook, MarketHoursDatabase.FromDataFolder(), SymbolPropertiesDatabase.FromDataFolder(), dataManager.Algorithm, RegisteredSecurityDataTypesProvider.Null);
+            var securityService = new SecurityService(portfolio.CashBook, MarketHoursDatabase.FromDataFolder(), SymbolPropertiesDatabase.FromDataFolder(), dataManager.Algorithm, RegisteredSecurityDataTypesProvider.Null, new SecurityCacheProvider(portfolio));
 
             portfolio.CashBook.EnsureCurrencyDataFeeds(securities, subscriptions, DefaultBrokerageModel.DefaultMarketMap, SecurityChanges.None, securityService);
 
@@ -284,7 +285,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             var security = securities[Symbols.AAPL];
@@ -313,69 +315,238 @@ namespace QuantConnect.Tests.Common.Securities
             var hasSufficientBuyingPower = security.BuyingPowerModel.HasSufficientBuyingPowerForOrder(portfolio, security, newOrder).IsSufficient;
             Assert.IsFalse(hasSufficientBuyingPower);
 
-            // now the stock doubles, so we should have margin remaining
+            // now the stock doubles, leverage is 1 we shouldn't have more margin remaining
 
             time = time.AddDays(1);
             const decimal highPrice = buyPrice * 2;
             security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, highPrice, highPrice, highPrice, highPrice, 1));
             portfolio.InvalidateTotalPortfolioValue();
 
-            Assert.AreEqual(quantity, portfolio.MarginRemaining);
-            Assert.AreEqual(quantity, portfolio.TotalMarginUsed);
+            Assert.AreEqual(0, portfolio.MarginRemaining);
+            Assert.AreEqual(quantity * 2, portfolio.TotalMarginUsed);
             Assert.AreEqual(quantity * 2, portfolio.TotalPortfolioValue);
 
             // we shouldn't be able to place a trader
             var anotherOrder = new MarketOrder(Symbols.AAPL, 1, time.AddSeconds(1)) { Price = highPrice };
             hasSufficientBuyingPower = security.BuyingPowerModel.HasSufficientBuyingPowerForOrder(portfolio, security, anotherOrder).IsSufficient;
-            Assert.IsTrue(hasSufficientBuyingPower);
+            Assert.IsFalse(hasSufficientBuyingPower);
 
-            // now the stock plummets, so we should have negative margin remaining
-
+            // now the stock plummets, leverage is 1 we shouldn't have margin remaining
             time = time.AddDays(1);
             const decimal lowPrice = buyPrice/2;
             security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, lowPrice, lowPrice, lowPrice, lowPrice, 1));
             portfolio.InvalidateTotalPortfolioValue();
 
-            Assert.AreEqual(-quantity/2m, portfolio.MarginRemaining);
-            Assert.AreEqual(quantity, portfolio.TotalMarginUsed);
+            Assert.AreEqual(0, portfolio.MarginRemaining);
+            Assert.AreEqual(quantity/2m, portfolio.TotalMarginUsed);
             Assert.AreEqual(quantity/2m, portfolio.TotalPortfolioValue);
-
 
             // this would not cause a margin call due to leverage = 1
             bool issueMarginCallWarning;
             var marginCallOrders = portfolio.MarginCallModel.GetMarginCallOrders(out issueMarginCallWarning);
             Assert.IsFalse(issueMarginCallWarning);
             Assert.AreEqual(0, marginCallOrders.Count);
+        }
 
-            // now change the leverage to test margin call warning and margin call logic
-            security.SetLeverage(leverage * 2);
+        [Test]
+        public void MarginWarningLeverage2()
+        {
+            var freeCash = 101;
+            const decimal leverage = 2m;
+            const int quantity = (int)(1000 * leverage);
+            var securities = new SecurityManager(TimeKeeper);
+            var transactions = new SecurityTransactionManager(null, securities);
+            var orderProcessor = new OrderProcessor();
+            transactions.SetOrderProcessor(orderProcessor);
+            var portfolio = new SecurityPortfolioManager(securities, transactions);
+            portfolio.CashBook[Currencies.USD].SetAmount(quantity / leverage + freeCash);
 
-            // Stock price increase by minimum variation
-            const decimal newPrice = lowPrice + 0.01m;
-            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, newPrice, newPrice, newPrice, newPrice, 1));
-            portfolio.InvalidateTotalPortfolioValue();
+            var config = CreateTradeBarDataConfig(SecurityType.Equity, Symbols.AAPL);
+            securities.Add(
+                new Security(
+                    SecurityExchangeHours,
+                    config,
+                    new Cash(Currencies.USD, 0, 1m),
+                    SymbolProperties.GetDefault(Currencies.USD),
+                    ErrorCurrencyConverter.Instance,
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
+                )
+            );
+            var security = securities[Symbols.AAPL];
+            security.SetLeverage(leverage);
 
-            // this would not cause a margin call, only a margin call warning
-            marginCallOrders = portfolio.MarginCallModel.GetMarginCallOrders(out issueMarginCallWarning);
-            Assert.IsTrue(issueMarginCallWarning);
-            Assert.AreEqual(0, marginCallOrders.Count);
+            var time = DateTime.Now;
+            const decimal buyPrice = 1m;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, buyPrice, buyPrice, buyPrice, buyPrice, 1));
 
-            // Price drops again to previous low, margin call orders will be issued
-            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, lowPrice, lowPrice, lowPrice, lowPrice, 1));
-            portfolio.InvalidateTotalPortfolioValue();
-
-            order = new MarketOrder(Symbols.AAPL, quantity, time) { Price = buyPrice };
-            fill = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { FillPrice = buyPrice, FillQuantity = quantity };
+            var order = new MarketOrder(Symbols.AAPL, quantity, time) { Price = buyPrice };
+            var fill = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { FillPrice = buyPrice, FillQuantity = quantity };
+            orderProcessor.AddOrder(order);
+            var request = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, order.Quantity, 0, 0, order.Time, null);
+            request.SetOrderId(0);
+            orderProcessor.AddTicket(new OrderTicket(null, request));
 
             portfolio.ProcessFill(fill);
 
+            Assert.AreEqual(0 + freeCash, portfolio.MarginRemaining);
+            Assert.AreEqual(quantity / leverage, portfolio.TotalMarginUsed);
+            Assert.AreEqual(quantity / leverage + freeCash, portfolio.TotalPortfolioValue);
+
+            // now the stock loses 10%
+            time = time.AddDays(1);
+            const decimal lowPrice = buyPrice * 0.9m;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, lowPrice, lowPrice, lowPrice, lowPrice, 1));
+            portfolio.InvalidateTotalPortfolioValue();
+
+            Assert.AreEqual(1, portfolio.MarginRemaining);
+            Assert.AreEqual((quantity * 0.9m) / leverage, portfolio.TotalMarginUsed);
+            Assert.AreEqual(901, portfolio.TotalPortfolioValue);
+
+            // this will cause a margin call warning, we still have $1 of margin available
+            bool issueMarginCallWarning;
+            var marginCallOrders = portfolio.MarginCallModel.GetMarginCallOrders(out issueMarginCallWarning);
+            Assert.IsTrue(issueMarginCallWarning);
+            Assert.AreEqual(0, marginCallOrders.Count);
+        }
+
+        [Test]
+        public void ComputeMarginProperlyAsSecurityPriceFluctuates_Leverage2()
+        {
+            const decimal leverage = 2m;
+            const int quantity = (int)(1000 * leverage);
+            var securities = new SecurityManager(TimeKeeper);
+            var transactions = new SecurityTransactionManager(null, securities);
+            var orderProcessor = new OrderProcessor();
+            transactions.SetOrderProcessor(orderProcessor);
+            var portfolio = new SecurityPortfolioManager(securities, transactions);
+            portfolio.CashBook[Currencies.USD].SetAmount(quantity / leverage);
+
+            var config = CreateTradeBarDataConfig(SecurityType.Equity, Symbols.AAPL);
+            securities.Add(
+                new Security(
+                    SecurityExchangeHours,
+                    config,
+                    new Cash(Currencies.USD, 0, 1m),
+                    SymbolProperties.GetDefault(Currencies.USD),
+                    ErrorCurrencyConverter.Instance,
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
+                )
+            );
+            var security = securities[Symbols.AAPL];
+            security.SetLeverage(leverage);
+
+            var time = DateTime.Now;
+            const decimal buyPrice = 1m;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, buyPrice, buyPrice, buyPrice, buyPrice, 1));
+
+            var order = new MarketOrder(Symbols.AAPL, quantity, time) { Price = buyPrice };
+            var fill = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { FillPrice = buyPrice, FillQuantity = quantity };
+            orderProcessor.AddOrder(order);
+            var request = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, order.Quantity, 0, 0, order.Time, null);
+            request.SetOrderId(0);
+            orderProcessor.AddTicket(new OrderTicket(null, request));
+
+            portfolio.ProcessFill(fill);
+
+            Assert.AreEqual(0, portfolio.MarginRemaining);
+            Assert.AreEqual(quantity / leverage, portfolio.TotalMarginUsed);
+            Assert.AreEqual(quantity / leverage, portfolio.TotalPortfolioValue);
+
+            // we shouldn't be able to place a trader
+            var newOrder = new MarketOrder(Symbols.AAPL, 1, time.AddSeconds(1)) { Price = buyPrice };
+            var hasSufficientBuyingPower = security.BuyingPowerModel.HasSufficientBuyingPowerForOrder(portfolio, security, newOrder).IsSufficient;
+            Assert.IsFalse(hasSufficientBuyingPower);
+
+            // now the stock doubles
+            time = time.AddDays(1);
+            const decimal highPrice = buyPrice * 2;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, highPrice, highPrice, highPrice, highPrice, 1));
+            portfolio.InvalidateTotalPortfolioValue();
+
+            // we have free margin now
+            Assert.AreEqual(quantity / leverage, portfolio.MarginRemaining);
+            // we are using a bit more margin too
+            Assert.AreEqual(quantity, portfolio.TotalMarginUsed);
+            // duplication increases our TPV by 'quantity'
+            Assert.AreEqual(quantity * 1.5, portfolio.TotalPortfolioValue);
+
+            // we should be able to place a trader
+            var anotherOrder = new MarketOrder(Symbols.AAPL, 1, time.AddSeconds(1)) { Price = highPrice };
+            hasSufficientBuyingPower = security.BuyingPowerModel.HasSufficientBuyingPowerForOrder(portfolio, security, anotherOrder).IsSufficient;
+            Assert.IsTrue(hasSufficientBuyingPower);
+
+            // now the stock plummets
+            time = time.AddDays(1);
+            const decimal lowPrice = buyPrice / 2;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, lowPrice, lowPrice, lowPrice, lowPrice, 1));
+            portfolio.InvalidateTotalPortfolioValue();
+
+            Assert.AreEqual(-quantity/ (leverage * 2), portfolio.MarginRemaining);
+            Assert.AreEqual(quantity / (leverage * 2), portfolio.TotalMarginUsed);
             Assert.AreEqual(0, portfolio.TotalPortfolioValue);
 
-            marginCallOrders = portfolio.MarginCallModel.GetMarginCallOrders(out issueMarginCallWarning);
+            // this will cause a margin call
+            bool issueMarginCallWarning;
+            var marginCallOrders = portfolio.MarginCallModel.GetMarginCallOrders(out issueMarginCallWarning);
             Assert.IsTrue(issueMarginCallWarning);
             Assert.AreNotEqual(0, marginCallOrders.Count);
-            Assert.AreEqual(-security.Holdings.Quantity, marginCallOrders[0].Quantity); // we bought twice
+            Assert.AreEqual(-security.Holdings.Quantity, marginCallOrders[0].Quantity);
             Assert.GreaterOrEqual(-portfolio.MarginRemaining, security.Price * marginCallOrders[0].Quantity);
+        }
+
+        [TestCase(OrderDirection.Buy)]
+        [TestCase(OrderDirection.Sell)]
+        public void InvertPositionLeverage2(OrderDirection direction)
+        {
+            const decimal leverage = 2m;
+            var invertedDirectionFactor = direction == OrderDirection.Buy ? -1 : 1;
+            var directionFactor = direction == OrderDirection.Buy ? 1 : -1;
+            var quantity = (int)(1000 * leverage * directionFactor);
+            var securities = new SecurityManager(TimeKeeper);
+            var transactions = new SecurityTransactionManager(null, securities);
+            var orderProcessor = new OrderProcessor();
+            transactions.SetOrderProcessor(orderProcessor);
+            var portfolio = new SecurityPortfolioManager(securities, transactions);
+            portfolio.CashBook[Currencies.USD].SetAmount(1000);
+
+            var config = CreateTradeBarDataConfig(SecurityType.Equity, Symbols.AAPL);
+            securities.Add(
+                new Security(
+                    SecurityExchangeHours,
+                    config,
+                    new Cash(Currencies.USD, 0, 1m),
+                    SymbolProperties.GetDefault(Currencies.USD),
+                    ErrorCurrencyConverter.Instance,
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
+                )
+            );
+            var security = securities[Symbols.AAPL];
+            security.FeeModel = new ConstantFeeModel(0);
+            security.SetLeverage(leverage);
+
+            var time = DateTime.Now;
+            const decimal buyPrice = 1m;
+            security.SetMarketPrice(new TradeBar(time, Symbols.AAPL, buyPrice, buyPrice, buyPrice, buyPrice, 1));
+
+            var order = new MarketOrder(Symbols.AAPL, quantity, time) { Price = buyPrice };
+            var fill = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { FillPrice = buyPrice, FillQuantity = quantity };
+            orderProcessor.AddOrder(order);
+            var request = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, order.Quantity, 0, 0, order.Time, null);
+            request.SetOrderId(0);
+            orderProcessor.AddTicket(new OrderTicket(null, request));
+
+            portfolio.ProcessFill(fill);
+
+            Assert.AreEqual(0, portfolio.MarginRemaining);
+            Assert.AreEqual( Math.Abs(quantity / leverage), portfolio.TotalMarginUsed);
+            Assert.AreEqual(Math.Abs(quantity / leverage), portfolio.TotalPortfolioValue);
+
+            var anotherOrder = new MarketOrder(Symbols.AAPL, 2 * Math.Abs(quantity) * invertedDirectionFactor, time.AddSeconds(1)) { Price = 1 };
+            var hasSufficientBuyingPower = security.BuyingPowerModel.HasSufficientBuyingPowerForOrder(portfolio, security, anotherOrder).IsSufficient;
+            Assert.IsTrue(hasSufficientBuyingPower);
         }
 
         [Test]
@@ -403,7 +574,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities[Symbols.AAPL].SetLeverage(2m);
@@ -470,7 +642,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -503,7 +676,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     new SymbolProperties("", Currencies.USD, 50, 0.01m, 1),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -536,7 +710,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     new SymbolProperties("", Currencies.USD, 50, 0.01m, 1),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -569,7 +744,8 @@ namespace QuantConnect.Tests.Common.Securities
                     portfolio.CashBook["EUR"],
                     SymbolProperties.GetDefault("EUR"),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -603,7 +779,8 @@ namespace QuantConnect.Tests.Common.Securities
                     portfolio.CashBook["EUR"],
                     SymbolProperties.GetDefault("EUR"),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities[Symbols.DE30EUR].SettlementModel = new AccountCurrencyImmediateSettlementModel();
@@ -643,7 +820,8 @@ namespace QuantConnect.Tests.Common.Securities
                     portfolio.CashBook["EUR"],
                     SymbolProperties.GetDefault("EUR"),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -676,7 +854,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
 
@@ -703,7 +882,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities[Symbols.AAPL].Holdings.SetHoldings(100, 100);
@@ -731,7 +911,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities[Symbols.AAPL].Holdings.SetHoldings(100, -100);
@@ -895,7 +1076,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             var security = securities[Symbols.AAPL];
@@ -963,7 +1145,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             var security = securities[Symbols.AAPL];
@@ -1034,7 +1217,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1096,7 +1280,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1157,7 +1342,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1219,7 +1405,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1282,7 +1469,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1343,7 +1531,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1412,7 +1601,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1477,7 +1667,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1542,7 +1733,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1603,7 +1795,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1663,7 +1856,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1724,7 +1918,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1786,7 +1981,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1847,7 +2043,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1909,7 +2106,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -1973,7 +2171,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -2039,7 +2238,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -2105,7 +2305,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             securities.Add(
@@ -2240,7 +2441,8 @@ namespace QuantConnect.Tests.Common.Securities
                     new Cash(Currencies.USD, 0, 1m),
                     SymbolProperties.GetDefault(Currencies.USD),
                     ErrorCurrencyConverter.Instance,
-                    RegisteredSecurityDataTypesProvider.Null
+                    RegisteredSecurityDataTypesProvider.Null,
+                    new SecurityCache()
                 )
             );
             Assert.Throws<InvalidOperationException>(() => portfolio.SetAccountCurrency(Currencies.USD));

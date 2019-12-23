@@ -13,9 +13,9 @@
  * limitations under the License.
 */
 
-using NodaTime;
 using QuantConnect.Data.Market;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -24,11 +24,6 @@ namespace QuantConnect.Data.Custom.CBOE
 {
     public class CBOE : TradeBar
     {
-        /// <summary>
-        /// Market data type
-        /// </summary>
-        public new MarketDataType DataType;
-
         /// <summary>
         /// Creates a new instance of the object
         /// </summary>
@@ -129,6 +124,22 @@ namespace QuantConnect.Data.Custom.CBOE
         public override string ToString()
         {
             return $"{Symbol} - O: {Open}, H: {High}, L: {Low}, C: {Close}";
+        }
+
+        /// <summary>
+        /// Gets the default resolution for this data and security type
+        /// </summary>
+        public override Resolution DefaultResolution()
+        {
+            return Resolution.Daily;
+        }
+
+        /// <summary>
+        /// Gets the supported resolution for this data and security type
+        /// </summary>
+        public override List<Resolution> SupportedResolutions()
+        {
+            return DailyResolution;
         }
     }
 }

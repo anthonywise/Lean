@@ -43,11 +43,19 @@ namespace QuantConnect.Tests
     /// </summary>
     public static class AlgorithmRunner
     {
-        public static void RunLocalBacktest(string algorithm, Dictionary<string, string> expectedStatistics, AlphaRuntimeStatistics expectedAlphaStatistics, Language language)
+        public static AlgorithmManager RunLocalBacktest(
+            string algorithm,
+            Dictionary<string, string> expectedStatistics,
+            AlphaRuntimeStatistics expectedAlphaStatistics,
+            Language language,
+            AlgorithmStatus expectedFinalStatus,
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            string setupHandler = "RegressionSetupHandlerWrapper")
         {
+            AlgorithmManager algorithmManager = null;
             var statistics = new Dictionary<string, string>();
             var alphaStatistics = new AlphaRuntimeStatistics(new TestAccountCurrencyProvider());
-            var algorithmManager = new AlgorithmManager(false);
 
             Composer.Instance.Reset();
             SymbolCache.Clear();
@@ -65,7 +73,7 @@ namespace QuantConnect.Tests
                 Config.Set("environment", "");
                 Config.Set("messaging-handler", "QuantConnect.Messaging.Messaging");
                 Config.Set("job-queue-handler", "QuantConnect.Queues.JobQueue");
-                Config.Set("setup-handler", "RegressionSetupHandlerWrapper");
+                Config.Set("setup-handler", setupHandler);
                 Config.Set("history-provider", "RegressionHistoryProviderWrapper");
                 Config.Set("api-handler", "QuantConnect.Api.Api");
                 Config.Set("result-handler", "QuantConnect.Lean.Engine.Results.RegressionResultHandler");
@@ -86,9 +94,9 @@ namespace QuantConnect.Tests
                 {
                     Log.DebuggingEnabled = true;
 
-                    Log.LogHandler.Trace("");
-                    Log.LogHandler.Trace("{0}: Running " + algorithm + "...", DateTime.UtcNow);
-                    Log.LogHandler.Trace("");
+                    Log.Trace("");
+                    Log.Trace("{0}: Running " + algorithm + "...", DateTime.UtcNow);
+                    Log.Trace("");
 
                     // run the algorithm in its own thread
 
@@ -98,8 +106,11 @@ namespace QuantConnect.Tests
                         try
                         {
                             string algorithmPath;
-                            var job = systemHandlers.JobQueue.NextJob(out algorithmPath);
-                            ((BacktestNodePacket)job).BacktestId = algorithm;
+                            var job = (BacktestNodePacket)systemHandlers.JobQueue.NextJob(out algorithmPath);
+                            job.BacktestId = algorithm;
+                            job.PeriodStart = startDate;
+                            job.PeriodFinish = endDate;
+                            algorithmManager = new AlgorithmManager(false, job);
 
                             systemHandlers.LeanManager.Initialize(systemHandlers, algorithmHandlers, job, algorithmManager);
 
@@ -108,7 +119,7 @@ namespace QuantConnect.Tests
                         }
                         catch (Exception e)
                         {
-                            Log.LogHandler.Trace($"Error in AlgorithmRunner task: {e}");
+                            Log.Trace($"Error in AlgorithmRunner task: {e}");
                         }
                     }).Wait();
 
@@ -123,11 +134,15 @@ namespace QuantConnect.Tests
             }
             catch (Exception ex)
             {
-                Log.LogHandler.Error("{0} {1}", ex.Message, ex.StackTrace);
+                if (expectedFinalStatus != AlgorithmStatus.RuntimeError)
+                {
+                    Log.Error("{0} {1}", ex.Message, ex.StackTrace);
+                }
             }
-            if (algorithmManager.State != AlgorithmStatus.Completed)
+
+            if (algorithmManager?.State != expectedFinalStatus)
             {
-                Assert.Fail($"Algorithm state should be completed and is: {algorithmManager.State}");
+                Assert.Fail($"Algorithm state should be {expectedFinalStatus} and is: {algorithmManager?.State}");
             }
 
             foreach (var stat in expectedStatistics)
@@ -160,6 +175,8 @@ namespace QuantConnect.Tests
             Directory.CreateDirectory(Path.GetDirectoryName(passedFile));
             File.Delete(passedOrderLogFile);
             if (File.Exists(ordersLogFile)) File.Copy(ordersLogFile, passedOrderLogFile);
+
+            return algorithmManager;
         }
 
         private static void AssertAlphaStatistics(AlphaRuntimeStatistics expected, AlphaRuntimeStatistics actual, Expression<Func<AlphaRuntimeStatistics, object>> selector)
@@ -184,9 +201,9 @@ namespace QuantConnect.Tests
         /// <summary>
         /// Used to intercept the algorithm instance to aid the <see cref="RegressionHistoryProviderWrapper"/>
         /// </summary>
-        class RegressionSetupHandlerWrapper : BacktestingSetupHandler
+        internal class RegressionSetupHandlerWrapper : BacktestingSetupHandler
         {
-            public static IAlgorithm Algorithm { get; private set; }
+            public static IAlgorithm Algorithm { get; protected set; }
             public override IAlgorithm CreateAlgorithmInstance(AlgorithmNodePacket algorithmNodePacket, string assemblyPath)
             {
                 Algorithm = base.CreateAlgorithmInstance(algorithmNodePacket, assemblyPath);

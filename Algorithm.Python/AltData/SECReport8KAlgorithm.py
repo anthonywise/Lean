@@ -37,7 +37,7 @@ class SECReport8KAlgorithm(QCAlgorithm):
         # Request underlying equity data.
         ibm = self.AddEquity("IBM", Resolution.Minute).Symbol
         # Add news data for the underlying IBM asset
-        earningsFiling = self.AddData(SECReport10Q, ibm).Symbol
+        earningsFiling = self.AddData(SECReport10Q, ibm, Resolution.Daily).Symbol
         # Request 120 days of history with the SECReport10Q IBM custom data Symbol
         history = self.History(SECReport10Q, earningsFiling, 120, Resolution.Daily)
 
@@ -70,7 +70,7 @@ class SECReport8KAlgorithm(QCAlgorithm):
             self.SetHoldings(equitySymbol, 1.0 / len(longEquitySymbols))
 
     def OnSecuritiesChanged(self, changes):
-        for r in [i for i in changes.RemovedSecurities if i.Symbol.SecurityType == SecurityType.Equity]:
+        for r in changes.RemovedSecurities:
             # If removed from the universe, liquidate and remove the custom data from the algorithm
             self.Liquidate(r.Symbol)
             self.RemoveSecurity(Symbol.CreateBase(SECReport8K, r.Symbol, Market.USA))

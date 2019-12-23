@@ -65,7 +65,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds.Enumerators.Factories
                 quoteCurrency,
                 new OptionSymbolProperties(SymbolProperties.GetDefault(Currencies.USD)),
                 ErrorCurrencyConverter.Instance,
-                RegisteredSecurityDataTypesProvider.Null
+                RegisteredSecurityDataTypesProvider.Null,
+                new SecurityCache()
             );
 
             var fillForwardResolution = Ref.CreateReadOnly(() => Resolution.Minute.ToTimeSpan());
@@ -195,6 +196,11 @@ namespace QuantConnect.Tests.Engine.DataFeeds.Enumerators.Factories
                 TotalLookupCalls++;
 
                 return _timeProvider.GetUtcNow().Date.Day >= 20 ? _symbolList2 : _symbolList1;
+            }
+
+            public bool CanAdvanceTime(SecurityType securityType)
+            {
+                return true;
             }
         }
     }

@@ -49,6 +49,13 @@ namespace QuantConnect.Securities
         protected readonly ConcurrentBag<SubscriptionDataConfig> SubscriptionsBag;
 
         /// <summary>
+        /// A null security leverage value
+        /// </summary>
+        /// <remarks>This value is used to determine when the
+        /// <see cref="SecurityInitializer"/> leverage is used</remarks>
+        public const decimal NullLeverage = 0;
+
+        /// <summary>
         /// Gets all the subscriptions for this security
         /// </summary>
         public IEnumerable<SubscriptionDataConfig> Subscriptions => SubscriptionsBag;
@@ -277,13 +284,14 @@ namespace QuantConnect.Securities
             Cash quoteCurrency,
             SymbolProperties symbolProperties,
             ICurrencyConverter currencyConverter,
-            IRegisteredSecurityDataTypesProvider registeredTypesProvider
+            IRegisteredSecurityDataTypesProvider registeredTypesProvider,
+            SecurityCache cache
             )
             : this(config,
                 quoteCurrency,
                 symbolProperties,
                 new SecurityExchange(exchangeHours),
-                new SecurityCache(),
+                cache,
                 new SecurityPortfolioModel(),
                 new ImmediateFillModel(),
                 new InteractiveBrokersFeeModel(),
@@ -307,13 +315,14 @@ namespace QuantConnect.Securities
             Cash quoteCurrency,
             SymbolProperties symbolProperties,
             ICurrencyConverter currencyConverter,
-            IRegisteredSecurityDataTypesProvider registeredTypesProvider
+            IRegisteredSecurityDataTypesProvider registeredTypesProvider,
+            SecurityCache cache
             )
             : this(symbol,
                 quoteCurrency,
                 symbolProperties,
                 new SecurityExchange(exchangeHours),
-                new SecurityCache(),
+                cache,
                 new SecurityPortfolioModel(),
                 new ImmediateFillModel(),
                 new InteractiveBrokersFeeModel(),
@@ -379,8 +388,7 @@ namespace QuantConnect.Securities
             SettlementModel = settlementModel;
             VolatilityModel = volatilityModel;
             Holdings = new SecurityHolding(this, currencyConverter);
-            Data = new DynamicSecurityData(registeredTypesProvider);
-            Cache.DataStored += (sender, args) => Data.StoreData(args.DataType, args.Data);
+            Data = new DynamicSecurityData(registeredTypesProvider, Cache);
 
             UpdateSubscriptionProperties();
         }
@@ -482,7 +490,7 @@ namespace QuantConnect.Securities
         /// <summary>
         /// If this uses tradebar data, return the most recent open.
         /// </summary>
-        public virtual decimal Open => Cache.Open == 0 ? Price: Cache.Open;
+        public virtual decimal Open => Cache.Open == 0 ? Price : Cache.Open;
 
         /// <summary>
         /// Access to the volume of the equity today
@@ -581,9 +589,7 @@ namespace QuantConnect.Securities
             if (data == null) return;
             Cache.AddData(data);
 
-            if (data is OpenInterest || data.Price == 0m) return;
-            Holdings.UpdateMarketPrice(Price);
-            VolatilityModel.Update(this, data);
+            UpdateConsumersMarketPrice(data);
         }
 
         /// <summary>
@@ -591,26 +597,14 @@ namespace QuantConnect.Securities
         /// on the data provided. Data is also stored into the security's data cache
         /// </summary>
         /// <param name="data">The security update data</param>
-        public void Update(IEnumerable<BaseData> data)
+        /// <param name="dataType">The data type</param>
+        /// <param name="containsFillForwardData">Flag indicating whether
+        /// <paramref name="data"/> contains any fill forward bar or not</param>
+        public void Update(IReadOnlyList<BaseData> data, Type dataType, bool? containsFillForwardData = null)
         {
-            BaseData last = null;
-            foreach (var grp in data.GroupBy(d => d.GetType()))
-            {
-                var nonFillForward = new List<BaseData>();
-                foreach (var baseData in grp)
-                {
-                    last = baseData;
-                    if (!baseData.IsFillForward)
-                    {
-                        nonFillForward.Add(baseData);
-                    }
-                }
-                // use the last of each type to set market price
-                SetMarketPrice(last);
+            Cache.AddDataList(data, dataType, containsFillForwardData);
 
-                // maintaining regression requires us to NOT cache FF data
-                Cache.StoreData(nonFillForward);
-            }
+            UpdateConsumersMarketPrice(data[data.Count - 1]);
         }
 
         /// <summary>
@@ -827,6 +821,13 @@ namespace QuantConnect.Securities
                 SubscriptionsBag.Add(subscription);
             }
             UpdateSubscriptionProperties();
+        }
+
+        private void UpdateConsumersMarketPrice(BaseData data)
+        {
+            if (data is OpenInterest || data.Price == 0m) return;
+            Holdings.UpdateMarketPrice(Price);
+            VolatilityModel.Update(this, data);
         }
 
         private void UpdateSubscriptionProperties()
